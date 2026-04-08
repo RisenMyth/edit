@@ -1,0 +1,53 @@
+name: Rust Multi-Platform Release
+
+on:
+  push:
+    tags:
+      - 'v*'   # 只有 push tag 时触发，例如 v1.0.0
+  workflow_dispatch: {} # 支持手动触发
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, x86_64-apple-darwin]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Install required targets
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare release artifact
+        run: |
+          mkdir -p release
+          BIN_NAME=your_binary_name
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp target/${{ matrix.target }}/release/${BIN_NAME}.exe release/${BIN_NAME}-windows.exe
+          elif [[ "${{ matrix.target }}" == *apple* ]]; then
+            cp target/${{ matrix.target }}/release/${BIN_NAME} release/${BIN_NAME}-macos
+          else
+            cp target/${{ matrix.target }}/release/${BIN_NAME} release/${BIN_NAME}-linux
+          fi
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
