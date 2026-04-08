@@ -3,8 +3,12 @@ name: Rust Multi-Platform Release
 on:
   push:
     tags:
-      - 'v*'  # 例如 v1.0.0
-  workflow_dispatch: {}
+      - 'v*'  # 正式 Release
+  workflow_dispatch:       # 手动触发预览版本
+    inputs:
+      date:
+        description: 'Preview date (optional, default today)'
+        required: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -30,13 +34,13 @@ jobs:
           BIN_NAME=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].targets[] | select(.kind[]=="bin") | .name')
           mkdir -p release
           cp target/release/$BIN_NAME release/$BIN_NAME-linux
-          zip -j release/$BIN_NAME-linux.zip release/$BIN_NAME-linux
+          tar -czf release/$BIN_NAME-linux.tar.gz -C release $BIN_NAME-linux
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-artifact
-          path: release/*.zip
+          path: release/*.tar.gz
 
   build-windows:
     runs-on: windows-latest
@@ -87,18 +91,39 @@ jobs:
           BIN_NAME=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].targets[] | select(.kind[]=="bin") | .name')
           mkdir -p release
           cp target/release/$BIN_NAME release/$BIN_NAME-macos
-          zip -j release/$BIN_NAME-macos.zip release/$BIN_NAME-macos
+          tar -czf release/$BIN_NAME-macos.tar.gz -C release $BIN_NAME-macos
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-artifact
-          path: release/*.zip
+          path: release/*.tar.gz
 
   upload-release:
     runs-on: ubuntu-latest
     needs: [build-linux, build-windows, build-macos]
     steps:
+      - name: Determine release tag
+        id: vars
+        run: |
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            DATE="${{ github.event.inputs.date }}"
+          else
+            DATE=$(date +%Y-%m-%d)
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG=${GITHUB_REF_NAME}
+            DRAFT=false
+            PRERELEASE=false
+          else
+            TAG="preview-$DATE"
+            DRAFT=true
+            PRERELEASE=true
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "draft=$DRAFT" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
@@ -117,9 +142,13 @@ jobs:
           name: macos-artifact
           path: release
 
-      - name: Upload to GitHub Release
+      - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: release/*.zip
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: ${{ steps.vars.outputs.tag }}
+          draft: ${{ steps.vars.outputs.draft }}
+          prerelease: ${{ steps.vars.outputs.prerelease }}
+          files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
