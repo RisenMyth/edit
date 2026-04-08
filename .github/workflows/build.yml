@@ -3,22 +3,21 @@ name: Rust Multi-Platform Release
 on:
   push:
     tags:
-      - 'v*'   # 只有 push tag 时触发，例如 v1.0.0
-  workflow_dispatch: {} # 支持手动触发
+      - 'v*'
+  workflow_dispatch: {}
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  build-linux-macos:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, x86_64-apple-darwin]
+        target: [x86_64-unknown-linux-gnu, x86_64-apple-darwin]
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
@@ -27,7 +26,7 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Install required targets
+      - name: Add Rust targets
         run: rustup target add ${{ matrix.target }}
 
       - name: Build release binary
@@ -37,17 +36,43 @@ jobs:
         run: |
           mkdir -p release
           BIN_NAME=your_binary_name
-          if [[ "${{ matrix.target }}" == *windows* ]]; then
-            cp target/${{ matrix.target }}/release/${BIN_NAME}.exe release/${BIN_NAME}-windows.exe
-          elif [[ "${{ matrix.target }}" == *apple* ]]; then
+          if [[ "${{ matrix.target }}" == *apple* ]]; then
             cp target/${{ matrix.target }}/release/${BIN_NAME} release/${BIN_NAME}-macos
           else
             cp target/${{ matrix.target }}/release/${BIN_NAME} release/${BIN_NAME}-linux
-          fi
 
-      - name: Upload release asset
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Build Windows release (MSVC)
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Prepare release artifact
+        run: |
+          mkdir release
+          copy target\x86_64-pc-windows-msvc\release\your_binary_name.exe release\your_binary_name-windows.exe
+
+  upload-release:
+    needs: [build-linux-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload release
         uses: softprops/action-gh-release@v1
         with:
-          files: release/*
+          files: |
+            build-linux-macos/release/*
+            build-windows/release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
